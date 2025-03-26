@@ -5,6 +5,8 @@ import os
 import subprocess
 from threading import Thread, Lock
 from flask_cors import CORS  # Import CORS
+import numpy as np
+import json
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -86,7 +88,20 @@ def index():
 @app.route('/api/projects')
 def get_projects():
     """API endpoint to get all projects"""
+    class NaNHandler(json.JSONEncoder):
+        def default(self, obj):
+            if isinstance(obj, float) and np.isnan(obj):
+                return None
+            return super().default(obj)
+    
     projects = load_projects_from_csv()
+    
+    # Convert NaN values to null
+    for project in projects:
+        for key, value in project.items():
+            if isinstance(value, float) and np.isnan(value):
+                project[key] = None
+    
     return jsonify(projects)
 
 @app.route('/api/projects/<int:project_id>')
