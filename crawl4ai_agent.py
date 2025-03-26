@@ -11,6 +11,9 @@ from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
+import csv
+import importlib
+import sys
 
 # Import Crawl4AI components
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode, LLMConfig
@@ -409,15 +412,19 @@ async def extract_with_gemini(markdown_content: str, keyword: str, source_url: s
         print(f"Error extracting with Gemini: {str(e)}")
         return []
 
-def save_contract_news_to_csv(news_items: List[ContractNews]):
+def save_contract_news_to_csv(news_items: List[ContractNews], filename: str = "contract_news.csv"):
     """Save contract news to a CSV file."""
     import csv
     
-    # Define the CSV file path
-    csv_file = "contract_news.csv"
+    # Debug: Print URLs before saving
+    print(f"\nVerifying source URLs before saving to {filename}:")
+    for i, item in enumerate(news_items[:5]):  # Just show first 5 for brevity
+        print(f"  Item {i+1}: {item.title[:30]}... -> URL: {item.source_url}")
+    if len(news_items) > 5:
+        print(f"  ... and {len(news_items)-5} more items")
     
     # Write to CSV file
-    with open(csv_file, "w", newline="", encoding="utf-8") as f:
+    with open(filename, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         
         # Write header
@@ -445,7 +452,250 @@ def save_contract_news_to_csv(news_items: List[ContractNews]):
                 item.description
             ])
     
-    print(f"Saved {len(news_items)} news items to {csv_file}")
+    print(f"Saved {len(news_items)} news items to {filename}")
+
+def read_csv_to_contract_news(filename: str) -> List[ContractNews]:
+    """Read a CSV file and convert to ContractNews objects."""
+    news_items = []
+    
+    try:
+        with open(filename, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    news_item = ContractNews(
+                        title=row["Title"],
+                        company=row["Company"],
+                        project_type=row["Project Type"],
+                        location=row["Location"],
+                        contract_value=row["Contract Value"],
+                        date_published=row["Date Published"],
+                        source_url=row["Source URL"],
+                        description=row["Description"]
+                    )
+                    news_items.append(news_item)
+                except Exception as e:
+                    print(f"Error converting row to ContractNews: {str(e)}")
+    except Exception as e:
+        print(f"Error reading CSV file {filename}: {str(e)}")
+        
+    return news_items
+
+def merge_contract_news_files(output_file: str, input_files: List[str]) -> List[ContractNews]:
+    """Merge multiple CSV files of contract news into one, removing duplicates."""
+    all_news = []
+    seen_titles = set()
+    
+    # Read each input file
+    for filename in input_files:
+        if os.path.exists(filename):
+            news_items = read_csv_to_contract_news(filename)
+            print(f"Read {len(news_items)} items from {filename}")
+            
+            # Add unique items
+            for item in news_items:
+                if item.title not in seen_titles:
+                    seen_titles.add(item.title)
+                    all_news.append(item)
+    
+    # Save merged results
+    if all_news:
+        save_contract_news_to_csv(all_news, output_file)
+        print(f"Merged {len(all_news)} unique items to {output_file}")
+    
+    return all_news
+
+def run_bse_scrapers():
+    """Run both BSE scrapers and save results to separate CSV files."""
+    results = []
+    
+    # Check if BSE scraper modules exist
+    if os.path.exists("bse_scraper.py"):
+        print("\nRunning BSE Scraper 1...")
+        try:
+            # Import the module
+            sys.path.append(os.getcwd())
+            bse_scraper = importlib.import_module("bse_scraper")
+            
+            # Run the scraper
+            announcements = bse_scraper.scrape_bse_announcements()
+            
+            # Debug: Print first few announcements to see their structure
+            if announcements:
+                print(f"\nReceived {len(announcements)} announcements from BSE Scraper 1")
+                print("Sample announcement structure:")
+                sample = announcements[0] if announcements else {}
+                
+                # Print the raw announcement
+                print(f"Raw announcement: {type(sample)}")
+                if hasattr(sample, '__dict__'):
+                    print(json.dumps(sample.__dict__, indent=2, default=str))
+                else:
+                    print(json.dumps(sample, indent=2, default=str))
+            
+            # Convert to ContractNews and save
+            if announcements:
+                news_items = []
+                for ann in announcements:
+                    try:
+                        # Handle both dictionary and object responses
+                        if hasattr(ann, '__dict__'):
+                            # It's an object, convert to dict
+                            ann_dict = ann.__dict__
+                            # Check if we need to convert from BSEAnnouncement model
+                            title = getattr(ann, 'title', None)
+                            company = getattr(ann, 'company', None)
+                            project_type = getattr(ann, 'project_type', None)
+                            location = getattr(ann, 'location', None)
+                            contract_value = getattr(ann, 'contract_value', None)
+                            date_obj = getattr(ann, 'date', None)
+                            description = getattr(ann, 'pdf_content', getattr(ann, 'description', None))
+                            attachment_url = getattr(ann, 'attachment_url', None)
+                        else:
+                            # It's already a dictionary - handle the exact JSON structure 
+                            # from the example
+                            title = ann.get("Title", ann.get("title", ""))
+                            company = ann.get("Company", ann.get("company", ""))
+                            project_type = ann.get("Project Type", ann.get("project_type", "Infrastructure"))
+                            location = ann.get("Location", ann.get("location", "India"))
+                            contract_value = ann.get("Contract Value", ann.get("contract_value", "Not specified"))
+                            date_obj = ann.get("Date", ann.get("date", None))
+                            description = ann.get("Description", ann.get("description", ""))
+                            # Get attachment URL directly from the key used in the example
+                            attachment_url = ann.get("attachment_url", None)
+                        
+                        # Handle date formatting
+                        if isinstance(date_obj, datetime):
+                            date_str = date_obj.strftime("%Y-%m-%d")
+                        elif isinstance(date_obj, str):
+                            date_str = date_obj
+                        else:
+                            date_str = datetime.now().strftime("%Y-%m-%d")
+                        
+                        # Debug: Print attachment URL if found
+                        if attachment_url:
+                            print(f"Found attachment URL for {title[:50]}...: {attachment_url}")
+                            print(f"Description: {description[:100]}...")
+                        
+                        # Use attachment_url if available, otherwise fall back to default BSE URL
+                        source_url = attachment_url if attachment_url else "https://www.bseindia.com/corporates/ann.html"
+                        
+                        news_item = ContractNews(
+                            title=title or "",
+                            company=company or "",
+                            project_type=project_type or "Infrastructure",
+                            location=location or "India",
+                            contract_value=contract_value or "Not specified",
+                            date_published=date_str,
+                            source_url=source_url,
+                            description=description or ""
+                        )
+                        news_items.append(news_item)
+                    except Exception as e:
+                        print(f"Error converting BSE announcement to ContractNews: {str(e)}")
+                        print(f"Problematic announcement: {ann}")
+                
+                # Save to CSV
+                save_contract_news_to_csv(news_items, "bse_scraper1_results.csv")
+                print(f"Saved {len(news_items)} items from BSE Scraper 1")
+                results.append("bse_scraper1_results.csv")
+        except Exception as e:
+            print(f"Error running BSE Scraper 1: {str(e)}")
+    
+    # Run BSE Scraper 2
+    if os.path.exists("bse_scraper2.py"):
+        print("\nRunning BSE Scraper 2...")
+        try:
+            # Import the module
+            sys.path.append(os.getcwd())
+            bse_scraper2 = importlib.import_module("bse_scraper2")
+            
+            # Run the scraper
+            announcements = bse_scraper2.scrape_bse_announcements()
+            
+            # Debug: Print first few announcements to see their structure
+            if announcements:
+                print(f"\nReceived {len(announcements)} announcements from BSE Scraper 2")
+                print("Sample announcement structure:")
+                sample = announcements[0] if announcements else {}
+                
+                # Print the raw announcement
+                print(f"Raw announcement: {type(sample)}")
+                if hasattr(sample, '__dict__'):
+                    print(json.dumps(sample.__dict__, indent=2, default=str))
+                else:
+                    print(json.dumps(sample, indent=2, default=str))
+            
+            # Convert to ContractNews and save
+            if announcements:
+                news_items = []
+                for ann in announcements:
+                    try:
+                        # Handle both dictionary and object responses
+                        if hasattr(ann, '__dict__'):
+                            # It's an object, convert to dict
+                            ann_dict = ann.__dict__
+                            # Check if we need to convert from BSEAnnouncement model
+                            title = getattr(ann, 'title', None)
+                            company = getattr(ann, 'company', None)
+                            project_type = getattr(ann, 'project_type', None)
+                            location = getattr(ann, 'location', None)
+                            contract_value = getattr(ann, 'contract_value', None)
+                            date_obj = getattr(ann, 'date', None)
+                            description = getattr(ann, 'pdf_content', getattr(ann, 'description', None))
+                            attachment_url = getattr(ann, 'attachment_url', None)
+                        else:
+                            # It's already a dictionary - handle the exact JSON structure 
+                            # from the example
+                            title = ann.get("Title", ann.get("title", ""))
+                            company = ann.get("Company", ann.get("company", ""))
+                            project_type = ann.get("Project Type", ann.get("project_type", "Infrastructure"))
+                            location = ann.get("Location", ann.get("location", "India"))
+                            contract_value = ann.get("Contract Value", ann.get("contract_value", "Not specified"))
+                            date_obj = ann.get("Date", ann.get("date", None))
+                            description = ann.get("Description", ann.get("description", ""))
+                            # Get attachment URL directly from the key used in the example
+                            attachment_url = ann.get("attachment_url", None)
+                        
+                        # Handle date formatting
+                        if isinstance(date_obj, datetime):
+                            date_str = date_obj.strftime("%Y-%m-%d")
+                        elif isinstance(date_obj, str):
+                            date_str = date_obj
+                        else:
+                            date_str = datetime.now().strftime("%Y-%m-%d")
+                        
+                        # Debug: Print attachment URL if found
+                        if attachment_url:
+                            print(f"Found attachment URL for {title[:50]}...: {attachment_url}")
+                            print(f"Description: {description[:100]}...")
+                        
+                        # Use attachment_url if available, otherwise fall back to default BSE URL
+                        source_url = attachment_url if attachment_url else "https://www.bseindia.com/corporates/ann.html"
+                        
+                        news_item = ContractNews(
+                            title=title or "",
+                            company=company or "",
+                            project_type=project_type or "Infrastructure",
+                            location=location or "India",
+                            contract_value=contract_value or "Not specified",
+                            date_published=date_str,
+                            source_url=source_url,
+                            description=description or ""
+                        )
+                        news_items.append(news_item)
+                    except Exception as e:
+                        print(f"Error converting BSE announcement to ContractNews: {str(e)}")
+                        print(f"Problematic announcement: {ann}")
+                
+                # Save to CSV
+                save_contract_news_to_csv(news_items, "bse_scraper2_results.csv")
+                print(f"Saved {len(news_items)} items from BSE Scraper 2")
+                results.append("bse_scraper2_results.csv")
+        except Exception as e:
+            print(f"Error running BSE Scraper 2: {str(e)}")
+    
+    return results
 
 def display_contract_news(news_items: List[ContractNews]):
     """Display contract news in a readable format."""
@@ -471,10 +721,17 @@ async def main():
     """Main function."""
     try:
         # Print welcome message
-        print("Steel Contract News Agent (Crawl4AI Version)")
+        print("Steel Contract News Agent (Combined Pipeline)")
         print("This agent will search for news about companies winning contracts in India")
         print("that would require steel in their execution.")
-        print()
+        print("-------------------------------------------------------------------")
+        
+        # Step 1: Run both BSE scrapers first
+        print("\nStep 1: Running BSE Scrapers...")
+        bse_result_files = run_bse_scrapers()
+        
+        # Step 2: Run Crawl4AI
+        print("\nStep 2: Running Crawl4AI search...")
         
         # Define the search keywords
         keywords = [
@@ -526,13 +783,19 @@ async def main():
                 seen_titles.add(item.title)
                 unique_news_items.append(item)
         
-        # Save to CSV
-        save_contract_news_to_csv(unique_news_items)
+        # Save Crawl4AI results to its own CSV
+        save_contract_news_to_csv(unique_news_items, "crawl4ai_results.csv")
         
-        # Display the results
-        display_contract_news(unique_news_items)
+        # Step 3: Merge all results
+        print("\nStep 3: Merging all results...")
+        all_files = bse_result_files + ["crawl4ai_results.csv"]
+        merged_news = merge_contract_news_files("contract_news.csv", all_files)
         
-        print(f"\nSearch completed. Found {len(unique_news_items)} unique news items. Results saved to contract_news.csv")
+        # Display the combined results
+        display_contract_news(merged_news)
+        
+        print(f"\nSearch completed. Combined {len(merged_news)} unique news items from all sources.")
+        print(f"Results saved to contract_news.csv")
         
     except Exception as e:
         print(f"Error: {str(e)}")

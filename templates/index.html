@@ -33,6 +33,37 @@
             </div>
         </div>
 
+        <!-- Search and Filter Section -->
+        <div class="card shadow-sm mb-4">
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="fas fa-search"></i></span>
+                            <input type="text" id="searchInput" class="form-control" placeholder="Search projects...">
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <select id="priorityFilter" class="form-select">
+                            <option value="">All Priorities</option>
+                            <option value="high">High Priority</option>
+                            <option value="medium">Medium Priority</option>
+                            <option value="low">Low Priority</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <select id="sortBy" class="form-select">
+                            <option value="">Sort By</option>
+                            <option value="priority-high">Priority (High to Low)</option>
+                            <option value="priority-low">Priority (Low to High)</option>
+                            <option value="date-new">Date (Newest First)</option>
+                            <option value="date-old">Date (Oldest First)</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div class="table-responsive">
             <div id="noProjectsMessage" class="text-center py-5" style="{% if not no_projects %}display: none;{% endif %}">
                 <i class="fas fa-search fa-3x text-muted mb-3"></i>
@@ -43,16 +74,17 @@
             <table class="table table-hover shadow-sm bg-white" id="projectsTable" style="{% if no_projects %}display: none;{% endif %}">
                 <thead class="table-light">
                     <tr>
+                        <th>Sr. No.</th>
                         <th>Project Details</th>
                         <th>Business Information</th>
                         <th>Value Assessment</th>
                         <th>Analysis</th>
-                   
                     </tr>
                 </thead>
-                <tbody>
+                <tbody id="projectsTableBody">
                     {% for project in projects %}
                     <tr>
+                        <td>{{ loop.index }}</td>
                         <td>
                             <div class="project-primary">
                                 <div class="project-title text-wrap">{{ project.Title }}</div>
@@ -84,15 +116,25 @@
                                 </div>
                             </div>
                         </td>
-                        <!-- <td>
-                            <button class="btn btn-outline-secondary btn-sm" onclick="viewProject({{ loop.index0 }})">
-                                <i class="fas fa-expand-alt"></i>
-                            </button>
-                        </td> -->
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
+
+            <!-- Pagination -->
+            <nav aria-label="Page navigation" class="mt-4">
+                <ul class="pagination justify-content-center" id="pagination">
+                    <li class="page-item disabled">
+                        <a class="page-link" href="#" tabindex="-1" aria-disabled="true">Previous</a>
+                    </li>
+                    <li class="page-item active"><a class="page-link" href="#">1</a></li>
+                    <li class="page-item"><a class="page-link" href="#">2</a></li>
+                    <li class="page-item"><a class="page-link" href="#">3</a></li>
+                    <li class="page-item">
+                        <a class="page-link" href="#">Next</a>
+                    </li>
+                </ul>
+            </nav>
         </div>
 
         <!-- Project Details Modal -->
@@ -118,10 +160,183 @@
         let pipelineTimeout = null;
         let projectCheckInterval = null;
         let projectModal = null;
+        let currentPage = 1;
+        const rowsPerPage = 10;
+        let allProjects = [];
 
         document.addEventListener('DOMContentLoaded', function() {
             projectModal = new bootstrap.Modal(document.getElementById('projectModal'));
+            setupEventListeners();
         });
+
+        function setupEventListeners() {
+            // Search input
+            document.getElementById('searchInput').addEventListener('input', filterProjects);
+            
+            // Priority filter
+            document.getElementById('priorityFilter').addEventListener('change', filterProjects);
+            
+            // Sort by
+            document.getElementById('sortBy').addEventListener('change', filterProjects);
+            
+            // Pagination
+            document.getElementById('pagination').addEventListener('click', function(e) {
+                if (e.target.classList.contains('page-link')) {
+                    e.preventDefault();
+                    const page = parseInt(e.target.getAttribute('data-page'));
+                    if (!isNaN(page)) {
+                        currentPage = page;
+                        updateTable();
+                    }
+                }
+            });
+        }
+
+        function filterProjects() {
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            const priorityFilter = document.getElementById('priorityFilter').value;
+            const sortBy = document.getElementById('sortBy').value;
+            
+            let filteredProjects = [...allProjects];
+            
+            // Apply search filter
+            if (searchTerm) {
+                filteredProjects = filteredProjects.filter(project => 
+                    (project.Title || '').toLowerCase().includes(searchTerm) ||
+                    (project.Company || '').toLowerCase().includes(searchTerm) ||
+                    (project.Location || '').toLowerCase().includes(searchTerm)
+                );
+            }
+            
+            // Apply priority filter
+            if (priorityFilter) {
+                filteredProjects = filteredProjects.filter(project => 
+                    (project.Urgency || '').toLowerCase() === priorityFilter
+                );
+            }
+            
+            // Apply sorting
+            if (sortBy) {
+                filteredProjects.sort((a, b) => {
+                    switch(sortBy) {
+                        case 'priority-high':
+                            return getPriorityValue(b.Urgency) - getPriorityValue(a.Urgency);
+                        case 'priority-low':
+                            return getPriorityValue(a.Urgency) - getPriorityValue(b.Urgency);
+                        case 'date-new':
+                            return new Date(b["Date Published"] || 0) - new Date(a["Date Published"] || 0);
+                        case 'date-old':
+                            return new Date(a["Date Published"] || 0) - new Date(b["Date Published"] || 0);
+                        default:
+                            return 0;
+                    }
+                });
+            }
+            
+            allProjects = filteredProjects;
+            currentPage = 1;
+            updateTable();
+        }
+
+        function getPriorityValue(priority) {
+            switch((priority || '').toLowerCase()) {
+                case 'high': return 3;
+                case 'medium': return 2;
+                case 'low': return 1;
+                default: return 0;
+            }
+        }
+
+        function updateTable() {
+            const tbody = document.getElementById('projectsTableBody');
+            const table = document.getElementById('projectsTable');
+            const noProjectsMessage = document.getElementById('noProjectsMessage');
+            const pipelineContainer = document.getElementById('pipelineContainer');
+            
+            if (allProjects.length === 0) {
+                table.style.display = 'none';
+                noProjectsMessage.style.display = 'block';
+                if (!isPipelineRunning) {
+                    pipelineContainer.style.display = 'block';
+                }
+                return;
+            }
+            
+            table.style.display = 'table';
+            noProjectsMessage.style.display = 'none';
+            pipelineContainer.style.display = 'none';
+            
+            const startIndex = (currentPage - 1) * rowsPerPage;
+            const endIndex = startIndex + rowsPerPage;
+            const pageProjects = allProjects.slice(startIndex, endIndex);
+            
+            tbody.innerHTML = '';
+            pageProjects.forEach((project, index) => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${startIndex + index + 1}</td>
+                    <td>
+                        <div class="project-primary">
+                            <div class="project-title">${project.Title || ''}</div>
+                            <div class="project-meta">${project["Project Type"] || ''}</div>
+                        </div>
+                    </td>
+                    <td>
+                        <div class="business-info">
+                            <div class="company-name">${project.Company || ''}</div>
+                            <div class="location">${project.Location || ''}</div>
+                            <div class="target">Target: ${project["Target Company"] || ''}</div>
+                        </div>
+                    </td>
+                    <td>
+                        <div class="value-info">
+                            <div class="contract">Contract: ${project["Contract Value"] || 'Not Available'}</div>
+                            <div class="potential">Potential: ${project["Potential Value"] || ''}</div>
+                            <div class="requirements">${project["Steel Requirements"] ? project["Steel Requirements"].substring(0, 50) + '...' : ''}</div>
+                        </div>
+                    </td>
+                    <td>
+                        <div class="analysis-info">
+                            <span class="urgency-badge ${project.Urgency ? project.Urgency.toLowerCase() : 'low'}">${project.Urgency || 'Low'}</span>
+                            <div class="reasoning-container">
+                                <div class="reasoning-content">${project.Reasoning || ''}</div>
+                                <a href="javascript:void(0)" class="read-more-link" onclick="toggleReasoning(this)">Read more</a>
+                            </div>
+                        </div>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+            
+            updatePagination();
+        }
+
+        function updatePagination() {
+            const totalPages = Math.ceil(allProjects.length / rowsPerPage);
+            const pagination = document.getElementById('pagination');
+            
+            let html = `
+                <li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+                    <a class="page-link" href="#" data-page="${currentPage - 1}">Previous</a>
+                </li>
+            `;
+            
+            for (let i = 1; i <= totalPages; i++) {
+                html += `
+                    <li class="page-item ${currentPage === i ? 'active' : ''}">
+                        <a class="page-link" href="#" data-page="${i}">${i}</a>
+                    </li>
+                `;
+            }
+            
+            html += `
+                <li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+                    <a class="page-link" href="#" data-page="${currentPage + 1}">Next</a>
+                </li>
+            `;
+            
+            pagination.innerHTML = html;
+        }
 
         function viewProject(index) {
             fetch(`/api/projects/${index}`)
@@ -178,76 +393,14 @@
             }
         }
 
-        // Function to update the table with new data
-        function updateTable(projects) {
-            const tbody = document.querySelector('#projectsTable tbody');
-            const table = document.getElementById('projectsTable');
-            const noProjectsMessage = document.getElementById('noProjectsMessage');
-            const pipelineContainer = document.getElementById('pipelineContainer');
-            
-            if (projects.length === 0) {
-                table.style.display = 'none';
-                noProjectsMessage.style.display = 'block';
-                if (!isPipelineRunning) {
-                    pipelineContainer.style.display = 'block';
-                }
-            } else {
-                table.style.display = 'table';
-                noProjectsMessage.style.display = 'none';
-                pipelineContainer.style.display = 'none';
-                isPipelineRunning = false;
-                
-                tbody.innerHTML = '';
-                projects.forEach(project => {
-                    const tr = document.createElement('tr');
-                    tr.innerHTML = `
-                        <td>
-                            <div class="project-primary">
-                                <div class="project-title">${project.Title || ''}</div>
-                                <div class="project-meta">${project.Project_Type || ''}</div>
-                            </div>
-                        </td>
-                        <td>
-                            <div class="business-info">
-                                <div class="company-name">${project.Company || ''}</div>
-                                <div class="location">${project.Location || ''}</div>
-                                <div class="target">Target: ${project.Target_Company || ''}</div>
-                            </div>
-                        </td>
-                        <td>
-                            <div class="value-info">
-                                <div class="contract">Contract: ${project.Contract_Value || 'Not Available'}</div>
-                                <div class="potential">Potential: ${project.Potential_Value || ''}</div>
-                                <div class="requirements">${project.Steel_Requirements ? project.Steel_Requirements.substring(0, 50) + '...' : ''}</div>
-                            </div>
-                        </td>
-                        <td>
-                            <div class="analysis-info">
-                                <span class="urgency-badge ${project.Urgency ? project.Urgency.toLowerCase() : 'low'}">${project.Urgency || 'Low'}</span>
-                                <div class="reasoning-container">
-                                    <div class="reasoning-content">${project.Reasoning || ''}</div>
-                                    <a href="javascript:void(0)" class="read-more-link" onclick="toggleReasoning(this)">Read more</a>
-                                </div>
-                            </div>
-                        </td>
-                        <td>
-                            <button class="btn btn-outline-secondary btn-sm" onclick="viewProject(${projects.indexOf(project)})">
-                                <i class="fas fa-expand-alt"></i>
-                            </button>
-                        </td>
-                    `;
-                    tbody.appendChild(tr);
-                });
-            }
-        }
-
         // Function to check for projects
         function checkForProjects() {
             return fetch('/api/projects')
                 .then(response => response.json())
                 .then(projects => {
                     if (projects.length > 0) {
-                        updateTable(projects);
+                        allProjects = projects;
+                        updateTable();
                         return true;
                     }
                     return false;
