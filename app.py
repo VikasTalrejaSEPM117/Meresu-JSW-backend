@@ -4,9 +4,24 @@ from datetime import datetime
 import os
 import subprocess
 from threading import Thread, Lock
+from flask_cors import CORS  # Import CORS
 
 # Initialize Flask app
 app = Flask(__name__)
+
+# Configure CORS to allow requests from frontend domains
+CORS(app, resources={
+    r"/api/*": {
+        "origins": [
+            "https://jsw-scrapped-data-frontend.vercel.app",
+            "http://localhost:3000", 
+            "http://127.0.0.1:3000",
+            "http://192.168.1.210:3000"
+        ],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"]
+    }
+})
 
 # Add these global variables after the imports
 CSV_FILE = "qualified_news.csv"
