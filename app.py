@@ -8,6 +8,12 @@ from flask_cors import CORS  # Import CORS
 import numpy as np
 import json
 
+try:
+    from PyPDF2 import PdfReader
+except ImportError:
+    print("PyPDF2 module not found. Please install it with: pip install PyPDF2")
+    PdfReader = None  # Define as None to prevent errors if import fails
+
 # Initialize Flask app
 app = Flask(__name__)
 
