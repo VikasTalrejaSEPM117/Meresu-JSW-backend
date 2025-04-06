@@ -151,44 +151,60 @@ class NewsQualificationPipeline:
             Dictionary with qualification results
         """
         prompt = f"""
-        You are a Steel Sales Lead Qualification System for a steel manufacturing company. Your task is to determine 
-        if a news article about a contract award or project is worth sending to our sales team for potential steel sales.
+You are a Steel Sales Lead Qualification System for a steel manufacturing company. Your task is to:
+1. Identify the industry and sub-category of the project
+2. Determine if the news article about a contract award or project is worth sending to our sales team for potential steel sales
 
-        You need to evaluate this news to determine:
-        1. Whether the project would require significant steel materials
-        2. Whether we could potentially sell steel to the company mentioned in the news (not to the government)
-        3. The specific potential steel requirements (types, quantities if mentioned)
-        4. The urgency/timeline of the opportunity
-        
-        News article details:
-        Title: {news.title}
-        Company: {news.company}
-        Project Type: {news.project_type}
-        Location: {news.location}
-        Contract Value: {news.contract_value}
-        Date: {news.date_published}
-        Description: {news.description}
+You need to evaluate this news to determine:
+1. Whether the project would require significant steel materials
+2. Whether we could potentially sell steel to the company mentioned in the news (not to the government)
+3. The specific potential steel requirements (types, quantities if mentioned)
+4. The urgency/timeline of the opportunity
 
-        Here are important criteria:
-        - Government entities are not direct targets for steel sales
-        - Small-scale IT or service contracts typically don't require significant steel
-        - Construction, infrastructure, manufacturing, energy projects often need substantial steel
-        - The contract value should be significant enough to indicate large material requirements
-        - We want to focus on opportunities where the company (not the government) would be purchasing steel
 
-        Provide your analysis in the following JSON format only:
-        {{
-            "qualified": true/false,
-            "steel_requirements": "Detailed description of likely steel requirements",
-            "potential_value": "Estimated percentage of the contract value that might be spent on steel",
-            "target_company": "The specific company that would potentially purchase the steel",
-            "urgency": "high/medium/low",
-            "reasoning": "Your detailed reasoning"
-        }}
-        
-        Response MUST be valid JSON.
-        """
-        
+### ALLOWED TAGS:
+- `Automotive-Confirmed`  
+- `Automotive-Predictive_Alert`  
+- `Infrastructure-Contract_Won`  
+- `Infrastructure-Ongoing_Tender`  
+- `Realty-Announced`  
+- `Realty-Predictive_Alert`  
+- `Renewable_Energy-Contract_Won`  
+- `Renewable_Energy-Ongoing_Tender`  
+- `Renewable_Energy-Predictive_Alert` 
+
+
+News article details:
+Title: {news.title}
+Company: {news.company}
+Project Type: {news.project_type}
+Location: {news.location}
+Contract Value: {news.contract_value}
+Date: {news.date_published}
+Description: {news.description}
+
+Here are important criteria:
+- First identify the industry and sub-category from the options above
+- Government entities are **not** direct targets for steel sales
+- Small-scale IT or service contracts typically don't require significant steel
+- Construction, infrastructure, manufacturing, energy projects often need substantial steel
+- The contract value should be significant enough to indicate large material requirements
+- We want to focus on opportunities where the company (not the government) would be purchasing steel
+
+Provide your analysis in the following JSON format only:
+{{
+    "qualified": true/false,
+    "tag": "Industry-SubCategory",  # MUST MATCH ALLOWED TAGS ABOVE
+    "sub_category": "Specific sub-category from the provided options",
+    "steel_requirements": "Detailed description of likely steel requirements",
+    "potential_value": "Estimated percentage of the contract value that might be spent on steel",
+    "target_company": "The specific company that would potentially purchase the steel",
+    "urgency": "high/medium/low",
+    "reasoning": "Your detailed reasoning including industry classification justification"
+}}
+
+Response MUST be valid JSON.
+"""
         result = await self._call_ai_model(prompt)
         
         # Extract JSON from the response
@@ -338,6 +354,7 @@ class NewsQualificationPipeline:
                 "Location", 
                 "Contract Value", 
                 "Date Published", 
+                 "Tag",  # Combined Industry-SubCategory
                 "Steel Requirements",
                 "Potential Value",
                 "Target Company",
@@ -356,6 +373,7 @@ class NewsQualificationPipeline:
                     news.location,
                     news.contract_value,
                     news.date_published,
+                    qualification.get("tag", ""),  # e.g., "Automotive-Confirmed"
                     qualification.get("steel_requirements", ""),
                     qualification.get("potential_value", ""),
                     qualification.get("target_company", ""),
