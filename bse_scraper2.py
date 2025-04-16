@@ -391,8 +391,8 @@ def scrape_bse_announcements() -> List[Dict[str, Any]]:
         
         # Get today's date and 1 year ago for the date range
         today = SCRAPER_DATE
-        one_year_ago = today - timedelta(days=365)
-
+        one_year_ago = today - timedelta(days=60)
+            
         # Since BSE API might limit results per request, we'll fetch data month by month
         current_date = one_year_ago
         while current_date <= today:
