@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Steel Contract News Agent - An AI agent that uses Crawl4AI to find news about 
-companies winning contracts in India that would require steel.
+companies winning contracts in India that would require steel in their execution. 
 """
 import os
 import asyncio
